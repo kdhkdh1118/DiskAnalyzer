@@ -1,7 +1,6 @@
 """List local files using Rclone without reading their contents."""
 
 import json
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +28,12 @@ class ScanResult:
         return sum(file.size for file in self.files)
 
 
+def _with_detail(message: str, stderr: str | None) -> str:
+    # Rclone이 남긴 마지막 오류 줄을 붙여서 실패 원인이 화면에 보이게 한다
+    lines = [line for line in (stderr or "").splitlines() if line.strip()]
+    return f"{message}\n\n{lines[-1]}" if lines else message
+
+
 def scan(folder: str) -> ScanResult:
     if not folder.strip():
         raise ScanError("분석할 폴더 경로를 입력해 주세요.")
@@ -41,10 +46,11 @@ def scan(folder: str) -> ScanResult:
         raise ScanError("폴더를 찾거나 열 수 없습니다.") from exc
 
     try:
+        # 설정 파일 경로를 빈 문자열로 주면 Windows와 Linux 모두 설정 없이 동작한다
         process = subprocess.run(
             [
                 "rclone", "lsjson", "--recursive", "--files-only", "--skip-links",
-                "--config", os.devnull, str(root),
+                "--config", "", str(root),
             ],
             capture_output=True,
             encoding="utf-8",
@@ -64,8 +70,10 @@ def scan(folder: str) -> ScanResult:
             for item in listing
         )
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise ScanError("Rclone이 유효한 파일 목록을 반환하지 못했습니다.") from exc
+        message = "Rclone이 유효한 파일 목록을 반환하지 못했습니다."
+        raise ScanError(_with_detail(message, process.stderr)) from exc
 
     if process.returncode != 0 and not files:
-        raise ScanError("폴더에서 파일 목록을 읽지 못했습니다.")
+        message = "폴더에서 파일 목록을 읽지 못했습니다."
+        raise ScanError(_with_detail(message, process.stderr))
     return ScanResult(root, files, process.returncode != 0)
