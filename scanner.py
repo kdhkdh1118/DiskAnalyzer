@@ -34,16 +34,33 @@ def _with_detail(message: str, stderr: str | None) -> str:
     return f"{message}\n\n{lines[-1]}" if lines else message
 
 
+def _scan_failure(stderr: str | None) -> str:
+    detail = (stderr or "").lower()
+    if "permission denied" in detail or "access is denied" in detail or "access denied" in detail:
+        message = (
+            "폴더 접근 권한이 없어 파일 목록을 읽지 못했습니다."
+            " 폴더의 읽기 권한과 접근 권한을 확인해 주세요."
+        )
+    else:
+        message = "폴더 스캔에 실패했습니다. 경로와 접근 권한을 확인해 주세요."
+    return _with_detail(message, stderr)
+
+
 def scan(folder: str) -> ScanResult:
     if not folder.strip():
         raise ScanError("분석할 폴더 경로를 입력해 주세요.")
 
     try:
-        root = Path(folder.strip()).expanduser().resolve(strict=True)
+        root = Path(folder).expanduser().resolve(strict=True)
         if not root.is_dir():
             raise ScanError("폴더 경로를 입력해 주세요.")
+    except PermissionError as exc:
+        raise ScanError(
+            "폴더 접근 권한이 없어 열 수 없습니다."
+            " 폴더와 상위 폴더의 읽기 권한과 접근 권한을 확인해 주세요."
+        ) from exc
     except (OSError, RuntimeError, ValueError) as exc:
-        raise ScanError("폴더를 찾거나 열 수 없습니다.") from exc
+        raise ScanError("폴더를 찾거나 열 수 없습니다. 경로와 접근 권한을 확인해 주세요.") from exc
 
     try:
         # 설정 파일 경로를 빈 문자열로 주면 Windows와 Linux 모두 설정 없이 동작한다
@@ -70,10 +87,11 @@ def scan(folder: str) -> ScanResult:
             for item in listing
         )
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        if process.returncode != 0:
+            raise ScanError(_scan_failure(process.stderr)) from exc
         message = "Rclone이 유효한 파일 목록을 반환하지 못했습니다."
         raise ScanError(_with_detail(message, process.stderr)) from exc
 
     if process.returncode != 0 and not files:
-        message = "폴더에서 파일 목록을 읽지 못했습니다."
-        raise ScanError(_with_detail(message, process.stderr))
+        raise ScanError(_scan_failure(process.stderr))
     return ScanResult(root, files, process.returncode != 0)

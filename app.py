@@ -5,6 +5,7 @@ import streamlit as st
 
 from analyzer import analyze, files_frame, format_size
 from scanner import ScanError, scan
+from treemap import TREEMAP_FILE_LIMIT, treemap_figure, treemap_frame
 
 
 def go_to(folder: str) -> None:
@@ -42,6 +43,8 @@ if result is not None:
     if result.is_partial:
         st.warning(
             "일부 파일이나 폴더를 읽지 못했습니다. 읽을 수 있는 항목만 집계했습니다."
+            " 전체 용량보다 작게 표시될 수 있습니다."
+            " 폴더의 읽기 권한과 접근 권한, 파일 상태를 확인한 뒤 다시 분석해 주세요."
         )
 
     # 드라이브 전체 상황과 분석한 폴더의 파일 크기 합계를 나눠서 보여준다
@@ -71,9 +74,26 @@ if result is not None:
         parent = current.rsplit("/", 1)[0] if "/" in current else ""
         st.button("⬆ 상위 폴더", on_click=go_to, args=(parent,))
 
-    st.markdown("**하위 폴더** · 폴더를 클릭하면 안으로 들어갑니다")
+    st.markdown("**파일 용량 트리맵** · 현재 폴더와 하위 폴더 전체 기준")
+    if view.file_count == 0:
+        st.info("분석할 파일이 없습니다. 파일이 있는 폴더인지 확인해 주세요.")
+    elif view.total_size == 0:
+        st.info("파일 크기가 모두 0 B여서 트리맵을 표시할 수 없습니다.")
+    else:
+        chart_files = treemap_frame(st.session_state.files, current)
+        st.plotly_chart(
+            treemap_figure(chart_files, shown.name or str(shown), view.file_count),
+            key=f"treemap_{st.session_state.get('view', 0)}",
+        )
+        st.caption(
+            f"용량이 큰 파일 최대 {TREEMAP_FILE_LIMIT}개를 표시하고,"
+            " 나머지는 '기타'로 합칩니다. 전체 용량과 파일 수는 모든 파일 기준입니다."
+            " 0 B 파일은 면적이 없어 트리맵에 표시하지 않습니다."
+        )
+
+    st.markdown("**하위 폴더** · 왼쪽 체크박스로 폴더를 선택하면 안으로 들어갑니다")
     if view.folders.empty:
-        st.caption("하위 폴더가 없습니다.")
+        st.caption("분석된 파일이 있는 하위 폴더가 없습니다.")
     else:
         folders = pd.DataFrame(
             {
