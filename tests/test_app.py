@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -17,6 +18,12 @@ class AppTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        db = tempfile.TemporaryDirectory()
+        self.addCleanup(db.cleanup)
+        test_db = str(Path(db.name) / "test.duckdb")
+        patcher = patch.dict(os.environ, {"DISK_ANALYZER_DB": test_db})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.app = AppTest.from_file(str(APP), default_timeout=20).run()
 
     def submit(self):
