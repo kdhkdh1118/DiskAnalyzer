@@ -37,13 +37,14 @@ SELECT
         WHEN contains(rest, '/') THEN split_part(rest, '/', 1)
         ELSE $direct
     END AS name,
+    contains(rest, '/') AS is_folder,
     sum(size)::BIGINT AS size
 FROM (
     SELECT substr(path, $start) AS rest, size
     FROM files
     WHERE scan_id = $scan_id AND starts_with(path, $prefix)
 )
-GROUP BY name
+GROUP BY name, is_folder
 """
 
 # 두 기록의 항목을 이름으로 맞춰 붙이고, 한쪽에만 있으면 새로 생김/사라짐으로 본다
@@ -52,7 +53,12 @@ WITH
     before AS ({ITEMS_SQL.replace("$scan_id", "$before_id")}),
     after AS ({ITEMS_SQL.replace("$scan_id", "$after_id")})
 SELECT
-    coalesce(after.name, before.name) AS name,
+    CASE
+        WHEN coalesce(after.is_folder, before.is_folder)
+            AND coalesce(after.name, before.name) = $direct
+        THEN $direct || '/'
+        ELSE coalesce(after.name, before.name)
+    END AS name,
     coalesce(before.size, 0)::BIGINT AS before_size,
     coalesce(after.size, 0)::BIGINT AS after_size,
     (coalesce(after.size, 0) - coalesce(before.size, 0))::BIGINT AS change,
@@ -64,7 +70,8 @@ SELECT
         ELSE '변화 없음'
     END AS status
 FROM before
-FULL OUTER JOIN after ON before.name = after.name
+FULL OUTER JOIN after
+    ON before.name = after.name AND before.is_folder = after.is_folder
 ORDER BY abs(change) DESC, name
 """
 
