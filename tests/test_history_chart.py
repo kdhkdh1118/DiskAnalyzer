@@ -100,6 +100,23 @@ class HistoryChartTests(unittest.TestCase):
         self.assertEqual(figure.data[0].y[0], "한글 경로/사진 '모음'_%")
         self.assertNotIn("magnitude", diff.columns)
 
+    def test_numeric_and_date_folder_names_remain_categories(self):
+        for names in (
+            ["001", "1", "1000"],
+            ["2024-03-01", "2024-01-01", "2024-02-01"],
+        ):
+            with self.subTest(names=names):
+                diff = comparison([
+                    (name, 0, size, size, "새로 생김")
+                    for name, size in zip(names, [300, 100, 200])
+                ])
+                figure = change_figure(diff)
+                expected = [names[0], names[2], names[1]]
+                self.assertEqual(figure.layout.yaxis.type, "category")
+                self.assertEqual(list(figure.data[0].y), expected)
+                self.assertEqual(list(figure.layout.yaxis.categoryarray), expected)
+                self.assertEqual(list(figure.data[0].x), [300, 200, 100])
+
 
 if __name__ == "__main__":
     unittest.main()

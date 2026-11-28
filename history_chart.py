@@ -57,7 +57,8 @@ def change_figure(diff: pd.DataFrame) -> go.Figure:
             zeroline=True, zerolinecolor="#666666", zerolinewidth=1,
         ),
         yaxis=dict(
-            autorange="reversed", categoryorder="array", categoryarray=names,
+            type="category", autorange="reversed",
+            categoryorder="array", categoryarray=names,
             automargin=True,
         ),
     )

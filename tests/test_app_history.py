@@ -138,6 +138,19 @@ class HistoryAppTests(unittest.TestCase):
         self.assertEqual(self.metrics()["이전 크기"], "10 B")
         self.assertEqual(self.metrics()["이후 크기"], "20 B")
         self.assertEqual(self.metrics()["증감"], "+10 B")
+        self.app.session_state["current"] = "A"
+        self.app.run()
+        self.assertTrue(any("기록에 저장하지 못했습니다" in item.value for item in self.app.warning))
+        self.submit(self.result(("A/a", 40)))
+        self.assertFalse(any("기록에 저장하지 못했습니다" in item.value for item in self.app.warning))
+
+    def test_missing_record_error_keeps_scan_results_visible(self):
+        self.save(self.result(("A/a", 10)))
+        with patch("history.compare_scans", side_effect=ValueError("선택한 스캔 기록을 찾을 수 없습니다.")):
+            self.submit(self.result(("A/a", 20)))
+        self.assertTrue(any("기록을 찾을 수 없습니다" in item.value for item in self.app.warning))
+        self.assertEqual(self.metrics()["파일 수"], "1개")
+        self.assertFalse(self.bars())
 
 
 if __name__ == "__main__":

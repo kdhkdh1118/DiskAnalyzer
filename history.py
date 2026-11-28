@@ -96,26 +96,32 @@ def save_scan(
     result: ScanResult, files: pd.DataFrame, db_path: Path | None = None
 ) -> int:
     with _connect(db_path) as con:
-        scan_id = con.execute(
-            """
-            INSERT INTO scans
-                (scanned_at, root_path, total_size, file_count, is_partial)
-            VALUES (?, ?, ?, ?, ?)
-            RETURNING scan_id
-            """,
-            [
-                datetime.now().replace(microsecond=0),
-                str(result.root),
-                result.total_bytes,
-                len(result.files),
-                result.is_partial,
-            ],
-        ).fetchone()[0]
-        con.register("new_files", files)
-        con.execute(
-            "INSERT INTO files SELECT ?, path, size, modified_at FROM new_files",
-            [scan_id],
-        )
+        con.execute("BEGIN TRANSACTION")
+        try:
+            scan_id = con.execute(
+                """
+                INSERT INTO scans
+                    (scanned_at, root_path, total_size, file_count, is_partial)
+                VALUES (?, ?, ?, ?, ?)
+                RETURNING scan_id
+                """,
+                [
+                    datetime.now().replace(microsecond=0),
+                    str(result.root),
+                    result.total_bytes,
+                    len(result.files),
+                    result.is_partial,
+                ],
+            ).fetchone()[0]
+            con.register("new_files", files)
+            con.execute(
+                "INSERT INTO files SELECT ?, path, size, modified_at FROM new_files",
+                [scan_id],
+            )
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
         return int(scan_id)
 
 
@@ -137,6 +143,16 @@ def compare_scans(
 ) -> pd.DataFrame:
     prefix = f"{folder}/" if folder else ""
     with _connect(db_path) as con:
+        roots = dict(
+            con.execute(
+                "SELECT scan_id, root_path FROM scans WHERE scan_id IN (?, ?)",
+                [before_id, after_id],
+            ).fetchall()
+        )
+        if before_id not in roots or after_id not in roots:
+            raise ValueError("선택한 스캔 기록을 찾을 수 없습니다. 기록을 다시 선택해 주세요.")
+        if roots[before_id] != roots[after_id]:
+            raise ValueError("같은 폴더의 스캔 기록끼리만 비교할 수 있습니다.")
         return con.execute(
             COMPARE_SQL,
             {

@@ -38,6 +38,7 @@ with st.form("scan_folder"):
 
 if submitted:
     st.session_state.pop("scan_result", None)
+    st.session_state.pop("history_save_error", None)
     try:
         with st.spinner("파일 목록을 읽는 중…"):
             result = scan(folder)
@@ -51,15 +52,15 @@ if submitted:
             st.session_state.scan_id = save_scan(result, st.session_state.files)
         except (duckdb.Error, OSError) as exc:
             st.session_state.scan_id = None
-            st.warning(
-                "이번 분석 결과를 기록에 저장하지 못했습니다."
-                f" 분석 결과와 기존 기록은 확인할 수 있습니다. ({exc})"
-            )
+            st.session_state.history_save_error = str(exc)
     except ScanError as exc:
         st.error(str(exc))
 
 result = st.session_state.get("scan_result")
 if result is not None:
+    save_error = st.session_state.get("history_save_error")
+    if save_error is not None:
+        st.warning(f"이번 분석 결과를 기록에 저장하지 못했습니다. ({save_error})")
     if result.is_partial:
         st.warning(
             "일부 파일이나 폴더를 읽지 못했습니다. 읽을 수 있는 항목만 집계했습니다."
@@ -226,7 +227,7 @@ if result is not None:
         st.caption("아래 값은 선택한 기록의 값으로, 위 분석 결과와 시점이 다를 수 있습니다.")
         try:
             diff = compare_scans(before_id, after_id, current)
-        except (duckdb.Error, OSError) as exc:
+        except (duckdb.Error, OSError, ValueError) as exc:
             st.warning(f"선택한 기록을 비교하지 못했습니다. ({exc})")
         else:
             before_total = int(diff["before_size"].sum())

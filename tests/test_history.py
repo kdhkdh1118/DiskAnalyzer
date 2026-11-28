@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import duckdb
+
 from analyzer import files_frame
 from history import DIRECT_FILES, compare_scans, list_scans, save_scan
 from scanner import FileEntry, ScanResult, scan
@@ -82,6 +84,49 @@ class HistoryTests(unittest.TestCase):
         before = self.save(make_result("/data/empty"))
         after = self.save(make_result("/data/empty"))
         self.assertTrue(compare_scans(before, after, db_path=self.db).empty)
+
+    def test_failed_file_insert_rolls_back_scan_header(self):
+        first = self.save(make_result("/data/a", ("file.bin", 10)))
+        result = make_result("/data/a", ("file.bin", 20))
+        invalid_files = files_frame(result).astype({"size": "string"})
+        invalid_files.loc[0, "size"] = "not-an-integer"
+        with self.assertRaises(duckdb.ConversionException):
+            save_scan(result, invalid_files, self.db)
+
+        scans = list_scans(Path("/data/a"), self.db)
+        self.assertEqual(scans["scan_id"].tolist(), [first])
+        self.assertEqual(scans["total_size"].tolist(), [10])
+        with duckdb.connect(str(self.db)) as con:
+            self.assertEqual(
+                con.execute("SELECT scan_id, path, size FROM files").fetchall(),
+                [(first, "file.bin", 10)],
+            )
+        after = self.save(result)
+        diff = compare_scans(first, after, db_path=self.db)
+        self.assertEqual(diff["change"].tolist(), [10])
+
+    def test_compare_rejects_missing_records(self):
+        valid = self.save(make_result("/data/a", ("file.bin", 10)))
+        for before, after in ((999, valid), (valid, 999), (998, 999)):
+            with self.subTest(before=before, after=after):
+                with self.assertRaisesRegex(ValueError, "스캔 기록을 찾을 수 없습니다"):
+                    compare_scans(before, after, db_path=self.db)
+
+    def test_compare_rejects_different_roots(self):
+        before = self.save(make_result("/data/a", ("file.bin", 10)))
+        after = self.save(make_result("/data/b", ("file.bin", 100)))
+        with self.assertRaisesRegex(ValueError, "같은 폴더"):
+            compare_scans(before, after, db_path=self.db)
+
+    def test_compare_accepts_same_record_and_reverse_order(self):
+        first = self.save(make_result("/data/a", ("file.bin", 10)))
+        second = self.save(make_result("/data/a", ("file.bin", 30)))
+        same = compare_scans(first, first, db_path=self.db)
+        self.assertEqual(same["change"].tolist(), [0])
+        self.assertEqual(same["status"].tolist(), ["변화 없음"])
+        reverse = compare_scans(second, first, db_path=self.db)
+        self.assertEqual(reverse["change"].tolist(), [-20])
+        self.assertEqual(reverse["status"].tolist(), ["감소"])
 
 
 @unittest.skipUnless(shutil.which("rclone"), "Rclone is not installed")
