@@ -1,9 +1,11 @@
 import shutil
 
+import duckdb
 import pandas as pd
 import streamlit as st
 
 from analyzer import analyze, files_frame, format_size
+from history import compare_scans, list_scans, save_scan
 from scanner import ScanError, scan
 from treemap import TREEMAP_FILE_LIMIT, treemap_figure, treemap_frame
 
@@ -18,6 +20,12 @@ def ratio_column() -> st.column_config.ProgressColumn:
     return st.column_config.ProgressColumn(
         "비율", format="%.1f%%", min_value=0, max_value=100
     )
+
+
+def signed_size(change: int) -> str:
+    if change == 0:
+        return "0 B"
+    return f"{'+' if change > 0 else '-'}{format_size(abs(change))}"
 
 
 st.set_page_config(page_title="Disk Analyzer", layout="wide")
@@ -35,6 +43,15 @@ if submitted:
         st.session_state.scan_result = result
         st.session_state.files = files_frame(result)
         go_to("")
+        # 분석할 때마다 기록을 남겨 두어야 나중에 같은 폴더의 변화를 비교할 수 있다
+        try:
+            st.session_state.scan_id = save_scan(result, st.session_state.files)
+        except (duckdb.Error, OSError) as exc:
+            st.session_state.scan_id = None
+            st.warning(
+                "스캔 기록을 저장하지 못했습니다."
+                f" 비교 기능 없이 결과만 표시합니다. ({exc})"
+            )
     except ScanError as exc:
         st.error(str(exc))
 
@@ -148,3 +165,50 @@ if result is not None:
             hide_index=True,
             column_config={"비율": ratio_column()},
         )
+
+    st.divider()
+    st.subheader("스캔 기록 비교")
+    st.caption(
+        "같은 폴더의 바로 이전 기록과 지금 기록을 현재 폴더 기준으로 비교합니다."
+    )
+    scan_id = st.session_state.get("scan_id")
+    try:
+        scans = list_scans(result.root) if scan_id else pd.DataFrame()
+    except (duckdb.Error, OSError):
+        scans = pd.DataFrame()
+    earlier = scans[scans["scan_id"] < scan_id] if not scans.empty else scans
+    if scans.empty:
+        st.caption("저장된 스캔 기록이 없습니다.")
+    elif earlier.empty:
+        st.caption(
+            "이 폴더의 첫 기록입니다."
+            " 나중에 같은 폴더를 다시 분석하면 변화를 비교할 수 있습니다."
+        )
+    else:
+        before = earlier.iloc[0]
+        now = scans[scans["scan_id"] == scan_id].iloc[0]
+        st.caption(
+            f"이전 기록 {before['scanned_at']:%Y-%m-%d %H:%M}"
+            f" → 현재 기록 {now['scanned_at']:%Y-%m-%d %H:%M}"
+        )
+        diff = compare_scans(int(before["scan_id"]), scan_id, current)
+        before_total, after_total = diff["before_size"].sum(), diff["after_size"].sum()
+        was, is_now, change = st.columns(3)
+        was.metric("이전 크기", format_size(before_total))
+        is_now.metric("현재 크기", format_size(after_total))
+        change.metric("증감", signed_size(after_total - before_total))
+        if diff.empty:
+            st.caption("비교할 항목이 없습니다.")
+        else:
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "항목": diff["name"],
+                        "이전": diff["before_size"].map(format_size),
+                        "현재": diff["after_size"].map(format_size),
+                        "증감": diff["change"].map(signed_size),
+                        "상태": diff["status"],
+                    }
+                ),
+                hide_index=True,
+            )

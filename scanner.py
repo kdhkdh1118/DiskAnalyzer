@@ -46,7 +46,16 @@ def _scan_failure(stderr: str | None) -> str:
     return _with_detail(message, stderr)
 
 
+def _unquote(folder: str) -> str:
+    # 탐색기 "경로로 복사"처럼 앞뒤에 따옴표가 붙은 경로만 따옴표를 벗긴다
+    text = folder.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return folder
+
+
 def scan(folder: str) -> ScanResult:
+    folder = _unquote(folder)
     if not folder.strip():
         raise ScanError("분석할 폴더 경로를 입력해 주세요.")
 

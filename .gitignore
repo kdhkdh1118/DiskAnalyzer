@@ -221,3 +221,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Disk Analyzer scan history (contains local file paths)
+data/
+*.duckdb
+*.duckdb.wal
